@@ -1,9 +1,14 @@
 """
 server.py — asyncio TCP server that accepts peer connections and dispatches
 framed messages to registered handler callbacks.
+
+When running as Master, the server also acts as a relay: a RELAY message
+received from one node is decoded and forwarded to the target node (or
+broadcast to all nodes when to_node_id is empty).
 """
 
 import asyncio
+import base64
 import logging
 from typing import Callable, Dict, Optional, Any
 
@@ -34,6 +39,7 @@ class SwampServer:
         self.device_name = device_name
         self.host = host
         self.port = port
+        self.is_master: bool = False   # enables relay behaviour
         self._server: Optional[asyncio.AbstractServer] = None
         self._handlers: Dict[str, Callable] = {}
         self._connections: Dict[str, asyncio.StreamWriter] = {}  # peer_name -> writer
@@ -101,6 +107,47 @@ class SwampServer:
         writer.write(frame)
         await writer.drain()
 
+    async def broadcast(self, frame: bytes, exclude: str = ""):
+        """Send frame to every connected peer except exclude (used by master)."""
+        for peer_name, writer in list(self._connections.items()):
+            if peer_name == exclude:
+                continue
+            try:
+                writer.write(frame)
+                await writer.drain()
+            except Exception as e:
+                logger.warning("broadcast to '%s' failed: %s", peer_name, e)
+
+    async def relay(self, header: dict, payload: bytes):
+        """
+        Master-only: forward an inner frame to the target node or broadcast.
+        inner_data is a base64-encoded pre-built frame.
+        """
+        to_node = header.get("to_node_id", "")
+        from_node = header.get("from_node_id", "")
+        inner_b64 = header.get("inner_data", "")
+        try:
+            inner_frame = base64.b64decode(inner_b64)
+        except Exception:
+            logger.warning("relay: invalid base64 inner_data")
+            return
+
+        if to_node:
+            # Unicast relay — find peer by node_id embedded in ROLE_ANNOUNCE cache
+            # Fall back to iterating connections (we match by name stored in header)
+            target_name = header.get("to_peer_name", "")
+            try:
+                if target_name:
+                    await self.send_to_peer(target_name, inner_frame)
+                else:
+                    logger.warning("relay: no to_peer_name; cannot unicast")
+            except KeyError:
+                logger.warning("relay: target peer '%s' not connected", target_name)
+        else:
+            # Broadcast to all except sender
+            from_name = header.get("from_peer_name", "")
+            await self.broadcast(inner_frame, exclude=from_name)
+
     # ------------------------------------------------------------------
     # Internal: client handling
     # ------------------------------------------------------------------
@@ -146,6 +193,11 @@ class SwampServer:
                         del self._connections[peer_name]
                     peer_name = new_name
                     self._connections[peer_name] = writer
+
+                # Master relay: transparently forward RELAY frames
+                if msg_type == MsgType.RELAY and self.is_master:
+                    await self.relay(header, payload)
+                    continue
 
                 # Dispatch to registered handler
                 handler = self._handlers.get(msg_type)

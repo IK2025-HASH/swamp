@@ -26,13 +26,20 @@ from typing import Optional, Dict, Any
 # ---------------------------------------------------------------------------
 
 class MsgType(str, Enum):
-    HELLO       = "HELLO"        # Announce device name/version on connect
-    CHAT        = "CHAT"         # Text chat message
-    FILE_META   = "FILE_META"    # File transfer metadata (name, size, mime)
-    FILE_DATA   = "FILE_DATA"    # Binary file chunk / screen frame
-    SYNC_DATA   = "SYNC_DATA"    # Contacts JSON or clipboard text
-    SCREEN_FRAME = "SCREEN_FRAME" # Compressed JPEG screen frame
-    ACK         = "ACK"          # Generic acknowledgement
+    HELLO         = "HELLO"          # Announce device name/version on connect
+    CHAT          = "CHAT"           # Text chat message
+    FILE_META     = "FILE_META"      # File transfer metadata (name, size, mime)
+    FILE_DATA     = "FILE_DATA"      # Binary file chunk / screen frame
+    SYNC_DATA     = "SYNC_DATA"      # Contacts JSON or clipboard text
+    SCREEN_FRAME  = "SCREEN_FRAME"   # Compressed JPEG screen frame
+    ACK           = "ACK"            # Generic acknowledgement
+    # ── topology messages ─────────────────────────────────────────────
+    ROLE_ANNOUNCE = "ROLE_ANNOUNCE"  # Device broadcasts its role + node_id
+    NODE_LIST     = "NODE_LIST"      # Master sends full peer list to new node
+    RELAY         = "RELAY"          # Master relays a frame between nodes
+    HEARTBEAT     = "HEARTBEAT"      # Node → master keepalive
+    STATE_SYNC    = "STATE_SYNC"     # Master sends shared state to new node
+    BROADCAST     = "BROADCAST"      # Master re-broadcasts a node's msg to all
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +93,44 @@ class ScreenFrameMsg:
     height: int
     chunk_size: int          # size of JPEG bytes that follow
     type: str = MsgType.SCREEN_FRAME
+
+
+@dataclass
+class RoleAnnounceMsg:
+    role: str        # "master" | "node"
+    node_id: str
+    device_name: str
+    type: str = MsgType.ROLE_ANNOUNCE
+
+
+@dataclass
+class NodeListMsg:
+    nodes: list      # [{node_id, name, ip, port, role}, ...]
+    type: str = MsgType.NODE_LIST
+
+
+@dataclass
+class RelayMsg:
+    from_node_id: str
+    to_node_id: str   # "" = broadcast to every connected node
+    inner_type: str   # MsgType of the wrapped message
+    inner_data: str   # base64-encoded inner frame
+    type: str = MsgType.RELAY
+
+
+@dataclass
+class HeartbeatMsg:
+    node_id: str
+    timestamp: float
+    type: str = MsgType.HEARTBEAT
+
+
+@dataclass
+class StateSyncMsg:
+    chat_history: list   # [{text, sender, timestamp}, ...]
+    files_list: list     # [{filename, size, sender, timestamp}, ...]
+    sync_items: list     # [{data_type, payload, timestamp}, ...]
+    type: str = MsgType.STATE_SYNC
 
 
 @dataclass
@@ -203,3 +248,23 @@ def make_chat(text: str, sender: str, timestamp: float) -> bytes:
 
 def make_ack(ref_type: str, ref_id: str, status: str = "ok", message: str = "") -> bytes:
     return encode_message(AckMsg(ref_type=ref_type, ref_id=ref_id, status=status, message=message))
+
+
+def make_role_announce(role: str, node_id: str, device_name: str) -> bytes:
+    return encode_message(RoleAnnounceMsg(role=role, node_id=node_id, device_name=device_name))
+
+
+def make_heartbeat(node_id: str, timestamp: float) -> bytes:
+    return encode_message(HeartbeatMsg(node_id=node_id, timestamp=timestamp))
+
+
+def make_node_list(nodes: list) -> bytes:
+    return encode_message(NodeListMsg(nodes=nodes))
+
+
+def make_state_sync(chat_history: list, files_list: list, sync_items: list) -> bytes:
+    return encode_message(StateSyncMsg(
+        chat_history=chat_history,
+        files_list=files_list,
+        sync_items=sync_items,
+    ))

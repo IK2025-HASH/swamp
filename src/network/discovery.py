@@ -46,17 +46,21 @@ class SwampDiscovery:
     Manages Zeroconf advertising and browsing for Swamp peers.
 
     Callbacks:
-        on_peer_added(name: str, ip: str, port: int)
+        on_peer_added(name: str, ip: str, port: int, role: str, node_id: str)
         on_peer_removed(name: str)
     """
 
     def __init__(
         self,
         device_name: str,
-        on_peer_added: Optional[Callable[[str, str, int], None]] = None,
+        node_id: str = "",
+        role: str = "node",
+        on_peer_added: Optional[Callable] = None,
         on_peer_removed: Optional[Callable[[str], None]] = None,
     ):
         self.device_name = device_name
+        self.node_id = node_id or device_name
+        self.role = role
         self.on_peer_added = on_peer_added
         self.on_peer_removed = on_peer_removed
 
@@ -65,7 +69,7 @@ class SwampDiscovery:
         self._service_info: Optional["ServiceInfo"] = None
         self._running = False
         self._lock = threading.Lock()
-        self._peers: Dict[str, dict] = {}  # name -> {ip, port}
+        self._peers: Dict[str, dict] = {}  # name -> {ip, port, role, node_id}
 
     # ------------------------------------------------------------------
     # Public API
@@ -127,8 +131,10 @@ class SwampDiscovery:
             addresses=[socket.inet_aton(local_ip)],
             port=SERVICE_PORT,
             properties={
-                "device": self.device_name.encode("utf-8"),
-                "version": b"1.0",
+                "device":   self.device_name.encode("utf-8"),
+                "version":  b"1.0",
+                "role":     self.role.encode("utf-8"),
+                "node_id":  self.node_id.encode("utf-8"),
             },
             server=f"{self.device_name}.local.",
         )
@@ -167,13 +173,20 @@ class SwampDiscovery:
                 if friendly == self.device_name:
                     return
 
-                with self._lock:
-                    self._peers[friendly] = {"ip": ip, "port": port}
+                props = info.properties or {}
+                peer_role = (props.get(b"role", b"node") or b"node").decode("utf-8", errors="replace")
+                peer_nid  = (props.get(b"node_id", b"") or b"").decode("utf-8", errors="replace")
 
-                logger.info("Peer added: %s at %s:%d", friendly, ip, port)
+                with self._lock:
+                    self._peers[friendly] = {
+                        "ip": ip, "port": port,
+                        "role": peer_role, "node_id": peer_nid,
+                    }
+
+                logger.info("Peer added: %s (%s) at %s:%d", friendly, peer_role, ip, port)
                 if self.on_peer_added:
                     try:
-                        self.on_peer_added(friendly, ip, port)
+                        self.on_peer_added(friendly, ip, port, peer_role, peer_nid)
                     except Exception as e:
                         logger.error("on_peer_added callback error: %s", e)
 
