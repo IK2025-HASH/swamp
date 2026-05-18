@@ -11,12 +11,49 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
-from kivy.uix.button import Button
 from kivy.uix.progressbar import ProgressBar
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.utils import platform
 
+from src.ui.theme import (
+    BG_BASE, BG_SURFACE,
+    C_GREEN, C_NODE,
+    T_PRIMARY, T_SECONDARY, T_DIM,
+    FS_XS, FS_SM, FS_MD, FS_LG,
+    RADIUS_MD,
+    H_BTN_SM, H_ROW,
+    SPACE_SM, SPACE_MD,
+)
+from src.ui.widgets import SwampHeader, SwampButton, EmptyState
+
 logger = logging.getLogger(__name__)
+
+
+def _fmt_size(n: int) -> str:
+    """Format bytes into a human-readable string."""
+    if n < 1024:
+        return f"{n:.0f} B"
+    n /= 1024
+    if n < 1024:
+        return f"{n:.0f} KB"
+    n /= 1024
+    return f"{n:.1f} MB"
+
+
+def _mime_icon(filename: str) -> str:
+    """Return a Unicode icon based on file extension."""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg"):
+        return "🖼"
+    if ext in (".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"):
+        return "🎵"
+    if ext in (".mp4", ".mkv", ".avi", ".mov", ".wmv", ".webm"):
+        return "▶"
+    if ext == ".pdf":
+        return "📄"
+    if ext in (".zip", ".tar", ".gz", ".bz2", ".7z", ".rar"):
+        return "📦"
+    return "📎"
 
 
 def _pick_file_android(callback):
@@ -29,7 +66,6 @@ def _pick_file_android(callback):
         intent.addCategory(Intent.CATEGORY_OPENABLE)
         PythonActivity = autoclass("org.kivy.android.PythonActivity")
         PythonActivity.mActivity.startActivityForResult(intent, 2001)
-        # The result will arrive in onActivityResult; for now signal not available
         logger.info("Android file picker launched")
     except Exception as e:
         logger.error("_pick_file_android: %s", e)
@@ -62,42 +98,49 @@ class FileRow(BoxLayout):
         super().__init__(
             orientation="horizontal",
             size_hint_y=None,
-            height=60,
-            padding=(10, 8),
+            height=H_ROW,
+            padding=(12, 8),
             spacing=10,
             **kwargs,
         )
         with self.canvas.before:
-            Color(0.13, 0.16, 0.20, 1)
-            self._bg = RoundedRectangle(pos=self.pos, size=self.size, radius=[8])
+            Color(*BG_SURFACE)
+            self._bg = RoundedRectangle(pos=self.pos, size=self.size, radius=RADIUS_MD)
         self.bind(pos=lambda w, _: setattr(w._bg, "pos", w.pos))
         self.bind(size=lambda w, _: setattr(w._bg, "size", w.size))
 
-        icon = "↓" if direction == "received" else "↑"
+        # MIME icon + direction arrow
+        icon_text = _mime_icon(filename)
+        direction_arrow = "↓" if direction == "received" else "↑"
+        icon_color = C_GREEN if direction == "received" else C_NODE
+
         icon_lbl = Label(
-            text=icon,
-            font_size="24sp",
-            color=(0.2, 0.85, 0.6, 1) if direction == "received" else (0.5, 0.7, 1.0, 1),
+            text=f"{icon_text}\n{direction_arrow}",
+            font_size="18sp",
+            color=icon_color,
             size_hint=(None, 1),
-            width=36,
+            width=40,
+            halign="center",
+            valign="middle",
         )
+        icon_lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
         self.add_widget(icon_lbl)
 
         info = BoxLayout(orientation="vertical", spacing=2)
         name_lbl = Label(
             text=f"[b]{filename}[/b]",
             markup=True,
-            font_size="14sp",
-            color=(1, 1, 1, 1),
+            font_size=FS_MD,
+            color=T_PRIMARY,
             halign="left",
         )
         name_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
 
-        size_str = self._fmt_size(filesize)
+        size_str = _fmt_size(filesize)
         meta_lbl = Label(
             text=f"{size_str} · {direction}",
-            font_size="11sp",
-            color=(0.55, 0.55, 0.55, 1),
+            font_size=FS_XS,
+            color=T_DIM,
             halign="left",
         )
         meta_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
@@ -105,14 +148,6 @@ class FileRow(BoxLayout):
         info.add_widget(name_lbl)
         info.add_widget(meta_lbl)
         self.add_widget(info)
-
-    @staticmethod
-    def _fmt_size(n: int) -> str:
-        for unit in ("B", "KB", "MB", "GB"):
-            if n < 1024:
-                return f"{n:.0f} {unit}"
-            n /= 1024
-        return f"{n:.1f} TB"
 
 
 class FilesScreen(Screen):
@@ -124,6 +159,7 @@ class FilesScreen(Screen):
         super().__init__(**kwargs)
         self.app_ref = None
         self._active_transfers = {}  # transfer_id -> {meta, progress_bar, bytes_received}
+        self._file_count = 0
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -132,42 +168,21 @@ class FilesScreen(Screen):
 
     def _build_ui(self):
         with self.canvas.before:
-            Color(0.08, 0.10, 0.12, 1)
+            Color(*BG_BASE)
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
-        root = BoxLayout(orientation="vertical", padding=(16, 12), spacing=12)
+        root = BoxLayout(orientation="vertical", padding=(16, 12), spacing=SPACE_MD)
 
         # Header
-        header = BoxLayout(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=56,
-            spacing=12,
-        )
-        back_btn = Button(
-            text="← Home",
-            size_hint=(None, 1),
-            width=100,
-            font_size="14sp",
-            background_color=(0.2, 0.24, 0.28, 1),
-            background_normal="",
-        )
-        back_btn.bind(on_press=lambda _: self._go("home"))
-        header.add_widget(back_btn)
-        header.add_widget(Label(
-            text="[b]File Transfer[/b]",
-            markup=True,
-            font_size="20sp",
-            color=(1, 1, 1, 1),
-        ))
-        root.add_widget(header)
+        self.header = SwampHeader(title="Files", back_screen="home")
+        root.add_widget(self.header)
 
         # Connected peer label
         self.peer_lbl = Label(
             text="No peer connected",
-            font_size="13sp",
-            color=(0.55, 0.55, 0.55, 1),
+            font_size=FS_SM,
+            color=T_DIM,
             size_hint_y=None,
             height=28,
             halign="center",
@@ -179,37 +194,35 @@ class FilesScreen(Screen):
         send_box = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=52,
-            spacing=10,
+            height=H_BTN_SM,
+            spacing=SPACE_SM,
         )
-        pick_btn = Button(
+        self._pick_btn = SwampButton(
             text="Pick File",
-            size_hint=(None, 1),
-            width=120,
-            font_size="15sp",
-            background_color=(0.18, 0.55, 0.85, 1),
-            background_normal="",
+            color=C_NODE,
+            height=H_BTN_SM,
         )
-        pick_btn.bind(on_press=self._on_pick_file)
-        send_box.add_widget(pick_btn)
+        self._pick_btn.size_hint = (None, 1)
+        self._pick_btn.width = 120
+        self._pick_btn.bind(on_press=self._on_pick_file)
+        send_box.add_widget(self._pick_btn)
 
         self.selected_lbl = Label(
             text="No file selected",
-            font_size="13sp",
-            color=(0.6, 0.6, 0.6, 1),
+            font_size=FS_SM,
+            color=T_DIM,
             halign="left",
         )
         self.selected_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         send_box.add_widget(self.selected_lbl)
 
-        self.send_btn = Button(
+        self.send_btn = SwampButton(
             text="Send",
-            size_hint=(None, 1),
-            width=90,
-            font_size="15sp",
-            background_color=(0.2, 0.75, 0.55, 1),
-            background_normal="",
+            color=C_GREEN,
+            height=H_BTN_SM,
         )
+        self.send_btn.size_hint = (None, 1)
+        self.send_btn.width = 90
         self.send_btn.bind(on_press=self._on_send_file)
         send_box.add_widget(self.send_btn)
         root.add_widget(send_box)
@@ -219,14 +232,23 @@ class FilesScreen(Screen):
             max=100,
             value=0,
             size_hint_y=None,
-            height=18,
+            height=10,
         )
+        # Colour the progress bar green via canvas override
+        with self.send_progress.canvas.before:
+            Color(*C_GREEN)
+            self._pb_rect = RoundedRectangle(
+                pos=self.send_progress.pos,
+                size=(0, self.send_progress.height),
+                radius=[4],
+            )
+        self.send_progress.bind(pos=self._upd_pb, size=self._upd_pb, value=self._upd_pb)
         root.add_widget(self.send_progress)
 
         self.send_status_lbl = Label(
             text="",
             font_size="12sp",
-            color=(0.55, 0.55, 0.55, 1),
+            color=T_DIM,
             size_hint_y=None,
             height=22,
             halign="center",
@@ -234,12 +256,12 @@ class FilesScreen(Screen):
         self.send_status_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         root.add_widget(self.send_status_lbl)
 
-        # Received file section
+        # Received section header
         root.add_widget(Label(
             text="[b]Received Files[/b]",
             markup=True,
-            font_size="16sp",
-            color=(0.8, 0.8, 0.8, 1),
+            font_size=FS_LG,
+            color=T_SECONDARY,
             size_hint_y=None,
             height=32,
             halign="left",
@@ -256,21 +278,46 @@ class FilesScreen(Screen):
         )
         root.add_widget(self.incoming_progress_box)
 
+        # File list area: empty state + scroll
+        self._list_area = BoxLayout(orientation="vertical")
+
+        self._empty_state = EmptyState(
+            icon="📎",
+            title="No files yet",
+            subtitle="Send or receive files from a connected peer",
+        )
+        self._list_area.add_widget(self._empty_state)
+
         scroll = ScrollView(bar_width=4)
         self.file_list = BoxLayout(
             orientation="vertical",
-            spacing=8,
+            spacing=SPACE_SM,
             padding=(0, 4),
             size_hint_y=None,
         )
         self.file_list.bind(minimum_height=self.file_list.setter("height"))
         scroll.add_widget(self.file_list)
-        root.add_widget(scroll)
+        self._file_scroll = scroll
+        scroll.opacity = 0
+        scroll.disabled = True
+        self._list_area.add_widget(scroll)
 
+        root.add_widget(self._list_area)
         self.add_widget(root)
 
-        # Keep track of selected file path
         self._selected_file = None
+
+    def _upd_pb(self, *_):
+        pb = self.send_progress
+        if pb.max > 0:
+            ratio = pb.value / pb.max
+        else:
+            ratio = 0
+        self._pb_rect.pos = pb.pos
+        self._pb_rect.size = (pb.width * ratio, pb.height)
+
+    def on_enter(self, *args):
+        self.header.set_manager(self.manager)
 
     def _upd_bg(self, *_):
         self._bg.pos = self.pos
@@ -337,7 +384,6 @@ class FilesScreen(Screen):
         Clock.schedule_once(lambda dt: self._on_file_meta_ui(transfer_id, filename, filesize))
 
     def _on_file_meta_ui(self, transfer_id: str, filename: str, filesize: int):
-        # Create a progress entry in the incoming area
         box = BoxLayout(
             orientation="vertical",
             size_hint_y=None,
@@ -346,14 +392,26 @@ class FilesScreen(Screen):
         )
         lbl = Label(
             text=f"Receiving: {filename}",
-            font_size="13sp",
-            color=(0.8, 0.8, 0.8, 1),
+            font_size=FS_SM,
+            color=T_SECONDARY,
             size_hint_y=None,
             height=22,
             halign="left",
         )
         lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
-        pb = ProgressBar(max=100, value=0, size_hint_y=None, height=18)
+        pb = ProgressBar(max=100, value=0, size_hint_y=None, height=10)
+        # Green fill on incoming progress bars
+        with pb.canvas.before:
+            Color(*C_GREEN)
+            _rect = RoundedRectangle(pos=pb.pos, size=(0, pb.height), radius=[4])
+
+        def _upd_inc_pb(*_):
+            ratio = pb.value / pb.max if pb.max > 0 else 0
+            _rect.pos = pb.pos
+            _rect.size = (pb.width * ratio, pb.height)
+
+        pb.bind(pos=_upd_inc_pb, size=_upd_inc_pb, value=_upd_inc_pb)
+
         box.add_widget(lbl)
         box.add_widget(pb)
         self.incoming_progress_box.add_widget(box)
@@ -395,4 +453,13 @@ class FilesScreen(Screen):
                 direction="received",
                 path=save_path,
             )
-            self.file_list.add_widget(row, index=0)  # newest first
+            self.file_list.add_widget(row, index=0)
+            self._file_count += 1
+            self._update_empty_state()
+
+    def _update_empty_state(self):
+        has_files = self._file_count > 0
+        self._empty_state.opacity = 0 if has_files else 1
+        self._empty_state.disabled = has_files
+        self._file_scroll.opacity = 1 if has_files else 0
+        self._file_scroll.disabled = not has_files

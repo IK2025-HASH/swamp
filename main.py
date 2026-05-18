@@ -30,7 +30,7 @@ os.environ.setdefault("KIVY_NO_ENV_CONFIG", "1")
 
 from kivy.app import App
 from kivy.clock import Clock
-from kivy.uix.screenmanager import ScreenManager, FadeTransition
+from kivy.uix.screenmanager import ScreenManager, SlideTransition
 from kivy.utils import platform
 from kivy.logger import Logger
 
@@ -116,7 +116,7 @@ class SwampApp(App):
     # ------------------------------------------------------------------
 
     def build(self):
-        sm = ScreenManager(transition=FadeTransition(duration=0.15))
+        sm = ScreenManager(transition=SlideTransition(direction="left", duration=0.2))
 
         self._home = HomeScreen(name="home")
         self._devices = DevicesScreen(name="devices")

@@ -10,20 +10,21 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 
-logger = logging.getLogger(__name__)
+from src.ui.theme import (
+    BG_BASE, BG_SURFACE, BG_RAISED,
+    BG_INPUT,
+    C_GREEN, C_MASTER, C_NODE, C_DANGER,
+    T_PRIMARY, T_SECONDARY, T_DIM,
+    FS_SM, FS_MD, FS_LG,
+    RADIUS_MD,
+    H_BTN, H_BTN_SM, H_INPUT, H_NAV,
+    SPACE_SM, SPACE_MD,
+)
+from src.ui.widgets import SwampButton, StatusDot
 
-# Palette
-C_BG       = (0.08, 0.10, 0.12, 1)
-C_MASTER   = (0.95, 0.60, 0.10, 1)   # amber  — the organiser
-C_NODE     = (0.15, 0.65, 0.85, 1)   # sky-blue — the traveller
-C_STOP     = (0.80, 0.25, 0.20, 1)   # red
-C_PANEL    = (0.13, 0.16, 0.20, 1)
-C_NAV      = (0.18, 0.22, 0.26, 1)
-C_GREEN    = (0.20, 0.85, 0.55, 1)
-C_DIM      = (0.50, 0.50, 0.50, 1)
+logger = logging.getLogger(__name__)
 
 
 class HomeScreen(Screen):
@@ -39,7 +40,7 @@ class HomeScreen(Screen):
 
     def _build_ui(self):
         with self.canvas.before:
-            Color(*C_BG)
+            Color(*BG_BASE)
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
@@ -54,20 +55,20 @@ class HomeScreen(Screen):
         ))
         root.add_widget(Label(
             text="Mobile Exchange Network",
-            font_size="14sp", color=C_DIM,
+            font_size="14sp", color=T_DIM,
             size_hint_y=None, height=26,
         ))
 
-        root.add_widget(Label(size_hint_y=None, height=8))
+        root.add_widget(Label(size_hint_y=None, height=SPACE_SM))
 
         # ── Device name ───────────────────────────────────────────────
         root.add_widget(self._label("Device Name"))
         self.name_input = TextInput(
             hint_text="Enter device name…",
             multiline=False,
-            size_hint_y=None, height=48, font_size="16sp",
-            background_color=C_PANEL,
-            foreground_color=(1, 1, 1, 1),
+            size_hint_y=None, height=H_INPUT, font_size="16sp",
+            background_color=BG_INPUT,
+            foreground_color=T_PRIMARY,
             cursor_color=C_GREEN,
         )
         self.name_input.text = socket.gethostname().split(".")[0] or "SwampDevice"
@@ -76,31 +77,33 @@ class HomeScreen(Screen):
         # ── Role explanation ──────────────────────────────────────────
         self.role_lbl = Label(
             text="Choose a role to start",
-            font_size="13sp", color=C_DIM,
+            font_size=FS_SM, color=T_DIM,
             size_hint_y=None, height=24,
         )
         root.add_widget(self.role_lbl)
 
+        # ── Status dot ────────────────────────────────────────────────
+        self.status_dot = StatusDot(text="Idle", color=T_DIM)
+        root.add_widget(self.status_dot)
+
         # ── Role buttons ──────────────────────────────────────────────
         role_row = BoxLayout(
             orientation="horizontal",
-            size_hint_y=None, height=60, spacing=12,
+            size_hint_y=None, height=H_BTN, spacing=12,
         )
 
-        self.master_btn = Button(
+        self.master_btn = SwampButton(
             text="Be Master  ★",
-            font_size="16sp",
-            background_color=C_MASTER,
-            background_normal="",
+            color=C_MASTER,
+            height=H_BTN,
         )
         self.master_btn.bind(on_press=self._on_master)
         role_row.add_widget(self.master_btn)
 
-        self.node_btn = Button(
+        self.node_btn = SwampButton(
             text="Join as Node  ⊙",
-            font_size="16sp",
-            background_color=C_NODE,
-            background_normal="",
+            color=C_NODE,
+            height=H_BTN,
         )
         self.node_btn.bind(on_press=self._on_node)
         role_row.add_widget(self.node_btn)
@@ -108,20 +111,19 @@ class HomeScreen(Screen):
         root.add_widget(role_row)
 
         # ── Stop button ───────────────────────────────────────────────
-        self.stop_btn = Button(
+        self.stop_btn = SwampButton(
             text="Stop",
-            size_hint_y=None, height=46, font_size="15sp",
-            background_color=(0.25, 0.28, 0.32, 1),
-            background_normal="",
-            disabled=True,
+            color=T_DIM,
+            height=H_BTN_SM,
         )
         self.stop_btn.bind(on_press=self._on_stop)
+        self.stop_btn.disabled = True
         root.add_widget(self.stop_btn)
 
-        # ── Status ────────────────────────────────────────────────────
+        # ── Status label ──────────────────────────────────────────────
         self.status_lbl = Label(
             text="Idle · choose a role above",
-            font_size="13sp", color=C_DIM,
+            font_size=FS_SM, color=T_DIM,
             size_hint_y=None, height=32,
             halign="center",
         )
@@ -134,10 +136,11 @@ class HomeScreen(Screen):
         info = BoxLayout(
             orientation="vertical",
             size_hint_y=None, height=64, spacing=2,
+            padding=(SPACE_MD, SPACE_SM),
         )
         with info.canvas.before:
-            Color(*C_PANEL)
-            info._bg = RoundedRectangle(pos=info.pos, size=info.size, radius=[10])
+            Color(*BG_SURFACE)
+            info._bg = RoundedRectangle(pos=info.pos, size=info.size, radius=RADIUS_MD)
         info.bind(pos=lambda w, p: setattr(w._bg, "pos", p),
                   size=lambda w, s: setattr(w._bg, "size", s))
         info.add_widget(Label(
@@ -150,12 +153,12 @@ class HomeScreen(Screen):
         ))
         root.add_widget(info)
 
-        root.add_widget(Label(size_hint_y=None, height=8))
+        root.add_widget(Label(size_hint_y=None, height=SPACE_SM))
 
         # ── Nav row ───────────────────────────────────────────────────
         nav = BoxLayout(
             orientation="horizontal",
-            size_hint_y=None, height=52, spacing=8,
+            size_hint_y=None, height=H_NAV, spacing=SPACE_SM,
         )
         for label, sname in [
             ("Devices", "devices"),
@@ -164,13 +167,15 @@ class HomeScreen(Screen):
             ("Files", "files"),
             ("Sync", "sync"),
         ]:
-            btn = Button(
-                text=label, font_size="14sp",
-                background_color=C_NAV, background_normal="",
+            btn = SwampButton(
+                text=label,
+                color=BG_RAISED,
+                height=H_NAV,
             )
             btn.screen_name = sname
-            btn.bind(on_press=lambda b: setattr(self.manager, "current", b.screen_name)
-                     if self.manager else None)
+            btn.bind(on_press=lambda b, sn=sname: (
+                setattr(self.manager, "current", sn) if self.manager else None
+            ))
             nav.add_widget(btn)
         root.add_widget(nav)
 
@@ -178,7 +183,7 @@ class HomeScreen(Screen):
 
     def _label(self, text):
         lbl = Label(
-            text=text, font_size="13sp", color=(0.75, 0.75, 0.75, 1),
+            text=text, font_size=FS_SM, color=T_SECONDARY,
             size_hint_y=None, height=24, halign="left",
         )
         lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
@@ -217,6 +222,10 @@ class HomeScreen(Screen):
     # State helpers
     # ------------------------------------------------------------------
 
+    def set_status_dot(self, text: str, color):
+        """Update the StatusDot widget."""
+        Clock.schedule_once(lambda dt: self.status_dot.set_status(text, color))
+
     def _set_active(self, role: str):
         self._active_role = role
         idle = role == "idle"
@@ -224,17 +233,22 @@ class HomeScreen(Screen):
         self.node_btn.disabled = not idle
         self.name_input.disabled = not idle
         self.stop_btn.disabled = idle
-        self.stop_btn.background_color = C_DIM if idle else C_STOP
 
         if role == "master":
             self.role_lbl.text = "Role: Master  ★"
             self.role_lbl.color = C_MASTER
+            self.stop_btn.btn_color = C_DANGER
+            self.set_status_dot("Master", C_MASTER)
         elif role == "node":
             self.role_lbl.text = "Role: Node  ⊙"
             self.role_lbl.color = C_NODE
+            self.stop_btn.btn_color = C_DANGER
+            self.set_status_dot("Node", C_NODE)
         else:
             self.role_lbl.text = "Choose a role to start"
-            self.role_lbl.color = C_DIM
+            self.role_lbl.color = T_DIM
+            self.stop_btn.btn_color = T_DIM
+            self.set_status_dot("Idle", T_DIM)
 
     # Called by SwampApp from async context via Clock
     def set_status(self, running: bool, role: str, text: str = ""):
@@ -247,5 +261,5 @@ class HomeScreen(Screen):
         self.status_lbl.color = (
             C_MASTER if role == "master" else
             C_NODE   if role == "node"   else
-            C_DIM
+            T_DIM
         )

@@ -13,11 +13,21 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
-from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
 from kivy.uix.image import Image as KivyImage
-from kivy.graphics import Color, Rectangle, Texture
+from kivy.graphics import Color, Rectangle, RoundedRectangle, Texture
 from kivy.graphics.texture import Texture as KivyTexture
+
+from src.ui.theme import (
+    BG_BASE, BG_SURFACE, BG_RAISED, BG_INPUT,
+    C_GREEN, C_NODE, C_DANGER,
+    T_PRIMARY, T_SECONDARY, T_DIM,
+    FS_SM, FS_MD,
+    RADIUS_MD,
+    H_BTN, H_BTN_SM,
+    SPACE_SM, SPACE_MD,
+)
+from src.ui.widgets import SwampHeader, SwampButton
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +44,6 @@ class SyncScreen(Screen):
         self._capture_session = None
         self._frame_index = 0
 
-        # For displaying received screen frames
         self._rx_texture = None
         self._build_ui()
 
@@ -44,42 +53,21 @@ class SyncScreen(Screen):
 
     def _build_ui(self):
         with self.canvas.before:
-            Color(0.08, 0.10, 0.12, 1)
+            Color(*BG_BASE)
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
-        root = BoxLayout(orientation="vertical", padding=(16, 12), spacing=10)
+        root = BoxLayout(orientation="vertical", padding=(16, 12), spacing=SPACE_MD)
 
         # Header
-        header = BoxLayout(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=56,
-            spacing=12,
-        )
-        back_btn = Button(
-            text="← Home",
-            size_hint=(None, 1),
-            width=100,
-            font_size="14sp",
-            background_color=(0.2, 0.24, 0.28, 1),
-            background_normal="",
-        )
-        back_btn.bind(on_press=lambda _: self._go("home"))
-        header.add_widget(back_btn)
-        header.add_widget(Label(
-            text="[b]Sync & Share[/b]",
-            markup=True,
-            font_size="20sp",
-            color=(1, 1, 1, 1),
-        ))
-        root.add_widget(header)
+        self.header = SwampHeader(title="Sync & Share", back_screen="home")
+        root.add_widget(self.header)
 
         # Peer label
         self.peer_lbl = Label(
             text="No peer connected",
-            font_size="13sp",
-            color=(0.55, 0.55, 0.55, 1),
+            font_size=FS_SM,
+            color=T_DIM,
             size_hint_y=None,
             height=28,
             halign="center",
@@ -88,28 +76,26 @@ class SyncScreen(Screen):
         root.add_widget(self.peer_lbl)
 
         # ── Data Sync section ──────────────────────────────────────────
-        root.add_widget(self._section_label("Data Sync"))
+        root.add_widget(self._section_label("DATA SYNC"))
 
         sync_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=52,
-            spacing=10,
+            height=H_BTN_SM,
+            spacing=SPACE_SM,
         )
-        contacts_btn = Button(
+        contacts_btn = SwampButton(
             text="Sync Contacts",
-            font_size="14sp",
-            background_color=(0.18, 0.55, 0.85, 1),
-            background_normal="",
+            color=C_NODE,
+            height=H_BTN_SM,
         )
         contacts_btn.bind(on_press=self._on_sync_contacts)
         sync_row.add_widget(contacts_btn)
 
-        clipboard_btn = Button(
+        clipboard_btn = SwampButton(
             text="Share Clipboard",
-            font_size="14sp",
-            background_color=(0.55, 0.35, 0.85, 1),
-            background_normal="",
+            color=(0.55, 0.35, 0.85, 1),
+            height=H_BTN_SM,
         )
         clipboard_btn.bind(on_press=self._on_share_clipboard)
         sync_row.add_widget(clipboard_btn)
@@ -118,7 +104,7 @@ class SyncScreen(Screen):
         self.sync_status_lbl = Label(
             text="",
             font_size="12sp",
-            color=(0.6, 0.6, 0.6, 1),
+            color=T_DIM,
             size_hint_y=None,
             height=24,
             halign="center",
@@ -127,33 +113,47 @@ class SyncScreen(Screen):
         root.add_widget(self.sync_status_lbl)
 
         # Received data display
-        root.add_widget(self._section_label("Received Data"))
-        scroll = ScrollView(size_hint_y=0.25, bar_width=4)
+        root.add_widget(self._section_label("RECEIVED DATA"))
+        recv_wrap = BoxLayout(
+            orientation="vertical",
+            size_hint_y=0.25,
+            padding=SPACE_SM,
+            spacing=0,
+        )
+        with recv_wrap.canvas.before:
+            Color(*BG_SURFACE)
+            recv_wrap._bg = RoundedRectangle(
+                pos=recv_wrap.pos, size=recv_wrap.size, radius=RADIUS_MD,
+            )
+        recv_wrap.bind(pos=lambda w, p: setattr(w._bg, "pos", p),
+                       size=lambda w, s: setattr(w._bg, "size", s))
+
+        scroll = ScrollView(bar_width=4)
         self.received_display = TextInput(
             hint_text="Received sync data will appear here…",
             readonly=True,
             multiline=True,
-            font_size="13sp",
-            background_color=(0.12, 0.15, 0.18, 1),
-            foreground_color=(0.9, 0.9, 0.9, 1),
+            font_size=FS_SM,
+            background_color=(0, 0, 0, 0),
+            foreground_color=T_SECONDARY,
         )
         scroll.add_widget(self.received_display)
-        root.add_widget(scroll)
+        recv_wrap.add_widget(scroll)
+        root.add_widget(recv_wrap)
 
         # ── Screen Share section ───────────────────────────────────────
-        root.add_widget(self._section_label("Screen Share"))
+        root.add_widget(self._section_label("SCREEN SHARE"))
 
         share_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=52,
-            spacing=10,
+            height=H_BTN_SM,
+            spacing=SPACE_SM,
         )
-        self.screen_share_btn = Button(
+        self.screen_share_btn = SwampButton(
             text="Start Screen Share",
-            font_size="14sp",
-            background_color=(0.2, 0.75, 0.55, 1),
-            background_normal="",
+            color=C_GREEN,
+            height=H_BTN_SM,
         )
         self.screen_share_btn.bind(on_press=self._on_toggle_screen_share)
         share_row.add_widget(self.screen_share_btn)
@@ -162,7 +162,7 @@ class SyncScreen(Screen):
         self.share_status_lbl = Label(
             text="Screen sharing: off",
             font_size="12sp",
-            color=(0.55, 0.55, 0.55, 1),
+            color=T_DIM,
             size_hint_y=None,
             height=24,
             halign="center",
@@ -171,32 +171,55 @@ class SyncScreen(Screen):
         root.add_widget(self.share_status_lbl)
 
         # Received screen frame display
-        root.add_widget(self._section_label("Received Screen"))
-        self.screen_image = KivyImage(
+        root.add_widget(self._section_label("RECEIVED SCREEN"))
+
+        # Screen image with a border
+        img_wrap = BoxLayout(
             size_hint_y=None,
-            height=180,
+            height=184,
+            padding=2,
+        )
+        with img_wrap.canvas.before:
+            Color(*BG_RAISED)
+            img_wrap._border = RoundedRectangle(
+                pos=img_wrap.pos, size=img_wrap.size, radius=RADIUS_MD,
+            )
+        img_wrap.bind(pos=lambda w, p: setattr(w._border, "pos", p),
+                      size=lambda w, s: setattr(w._border, "size", s))
+
+        self.screen_image = KivyImage(
             allow_stretch=True,
             keep_ratio=True,
         )
         with self.screen_image.canvas.before:
-            Color(0.08, 0.1, 0.12, 1)
-            Rectangle(pos=self.screen_image.pos, size=self.screen_image.size)
-        root.add_widget(self.screen_image)
+            Color(*BG_BASE)
+            self._si_bg_rect = Rectangle(
+                pos=self.screen_image.pos, size=self.screen_image.size,
+            )
+        self.screen_image.bind(
+            pos=lambda w, p: setattr(self._si_bg_rect, "pos", p),
+            size=lambda w, s: setattr(self._si_bg_rect, "size", s),
+        )
+        img_wrap.add_widget(self.screen_image)
+        root.add_widget(img_wrap)
 
         self.add_widget(root)
 
     def _section_label(self, text: str) -> Label:
         lbl = Label(
-            text=f"[b]{text}[/b]",
-            markup=True,
-            font_size="15sp",
-            color=(0.7, 0.75, 0.8, 1),
+            text=text,
+            font_size="11sp",
+            color=T_DIM,
             size_hint_y=None,
-            height=30,
+            height=24,
             halign="left",
+            letter_spacing="1sp",
         )
         lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         return lbl
+
+    def on_enter(self, *args):
+        self.header.set_manager(self.manager)
 
     def _upd_bg(self, *_):
         self._bg.pos = self.pos
@@ -310,7 +333,7 @@ class SyncScreen(Screen):
         )
         self._screen_sharing = True
         self.screen_share_btn.text = "Stop Screen Share"
-        self.screen_share_btn.background_color = (0.85, 0.3, 0.2, 1)
+        self.screen_share_btn.btn_color = C_DANGER
         self.share_status_lbl.text = "Screen sharing: on"
         logger.info("Screen share started")
 
@@ -320,7 +343,7 @@ class SyncScreen(Screen):
             self._capture_session = None
         self._screen_sharing = False
         self.screen_share_btn.text = "Start Screen Share"
-        self.screen_share_btn.background_color = (0.2, 0.75, 0.55, 1)
+        self.screen_share_btn.btn_color = C_GREEN
         self.share_status_lbl.text = "Screen sharing: off"
         logger.info("Screen share stopped")
 

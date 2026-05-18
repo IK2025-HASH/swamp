@@ -22,18 +22,18 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.graphics import Color, Rectangle
 
-logger = logging.getLogger(__name__)
+from src.ui.theme import (
+    BG_BASE, BG_SURFACE, BG_RAISED, BG_INPUT,
+    C_GREEN, C_MASTER, C_NODE,
+    T_PRIMARY, T_SECONDARY, T_DIM,
+    FS_SM, FS_MD, FS_LG, FS_XL,
+    RADIUS_MD,
+    H_INPUT, H_BTN, H_BTN_SM,
+    SPACE_SM, SPACE_MD,
+)
+from src.ui.widgets import SwampHeader, SwampButton, StatusDot
 
-# --------------------------------------------------------------------------- #
-# Palette (matches rest of app)                                               #
-# --------------------------------------------------------------------------- #
-C_BG     = (0.08, 0.10, 0.12, 1)
-C_GREEN  = (0.20, 0.85, 0.55, 1)
-C_MASTER = (0.95, 0.60, 0.10, 1)
-C_NODE   = (0.15, 0.65, 0.85, 1)
-C_NAV    = (0.18, 0.22, 0.26, 1)
-C_PANEL  = (0.13, 0.16, 0.20, 1)
-C_DIM    = (0.50, 0.50, 0.50, 1)
+logger = logging.getLogger(__name__)
 
 # Camera is an optional, platform-dependent widget
 try:
@@ -63,20 +63,6 @@ except Exception:
 
 
 # --------------------------------------------------------------------------- #
-# Helper: small nav button                                                    #
-# --------------------------------------------------------------------------- #
-
-def _nav_btn(text, width=110, color=C_NAV):
-    return Button(
-        text=text,
-        size_hint=(None, 1), width=width,
-        font_size="14sp",
-        background_color=color,
-        background_normal="",
-    )
-
-
-# --------------------------------------------------------------------------- #
 # QRScreen                                                                    #
 # --------------------------------------------------------------------------- #
 
@@ -86,8 +72,8 @@ class QRScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.app_ref = None
-        self._scan_event = None      # Clock event for frame polling
-        self._camera_widget = None   # Camera instance (if available)
+        self._scan_event = None
+        self._camera_widget = None
         self._build_ui()
 
     # ---------------------------------------------------------------------- #
@@ -96,7 +82,7 @@ class QRScreen(Screen):
 
     def _build_ui(self):
         with self.canvas.before:
-            Color(*C_BG)
+            Color(*BG_BASE)
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
@@ -109,7 +95,6 @@ class QRScreen(Screen):
         self._root.add_widget(self._show_layout)
         self._root.add_widget(self._scan_layout)
 
-        # Start in "show" mode
         self._set_mode("show")
 
     # ── Show-mode layout ─────────────────────────────────────────────────── #
@@ -117,22 +102,18 @@ class QRScreen(Screen):
     def _build_show_layout(self) -> BoxLayout:
         layout = BoxLayout(orientation="vertical", spacing=14)
 
-        # Header
-        header = BoxLayout(orientation="horizontal", size_hint_y=None, height=56, spacing=12)
-        back_btn = _nav_btn("← Back")
-        back_btn.bind(on_press=lambda _: self._go("home"))
-        header.add_widget(back_btn)
-
-        header.add_widget(Label(
-            text="[b]QR Pair[/b]", markup=True,
-            font_size="20sp", color=(1, 1, 1, 1),
-        ))
-
-        scan_btn = _nav_btn("Scan", color=(0.18, 0.55, 0.85, 1))
+        # "Scan" button as right_widget on header
+        scan_btn = SwampButton(text="Scan", color=C_NODE, height=H_BTN_SM)
+        scan_btn.size_hint = (None, 1)
+        scan_btn.width = 80
         scan_btn.bind(on_press=lambda _: self._set_mode("scan"))
-        header.add_widget(scan_btn)
 
-        layout.add_widget(header)
+        self._show_header = SwampHeader(
+            title="QR Pair",
+            back_screen="home",
+            right_widget=scan_btn,
+        )
+        layout.add_widget(self._show_header)
 
         # QR image widget
         self.qr_image = Image(
@@ -145,7 +126,7 @@ class QRScreen(Screen):
         # Device info labels
         self.show_name_lbl = Label(
             text="",
-            markup=True, font_size="22sp",
+            markup=True, font_size=FS_XL,
             color=C_GREEN,
             size_hint_y=None, height=38,
             halign="center",
@@ -153,20 +134,16 @@ class QRScreen(Screen):
         self.show_name_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
         layout.add_widget(self.show_name_lbl)
 
-        self.show_role_lbl = Label(
-            text="",
-            font_size="15sp",
-            color=C_DIM,
-            size_hint_y=None, height=28,
-            halign="center",
-        )
-        self.show_role_lbl.bind(size=lambda w, s: setattr(w, "text_size", (s[0], None)))
-        layout.add_widget(self.show_role_lbl)
+        # Role badge using StatusDot
+        self._show_role_dot = StatusDot(text="Node", color=C_NODE)
+        self._show_role_dot.size_hint_y = None
+        self._show_role_dot.height = 28
+        layout.add_widget(self._show_role_dot)
 
         self.show_addr_lbl = Label(
             text="",
-            font_size="13sp",
-            color=C_DIM,
+            font_size=FS_SM,
+            color=T_DIM,
             size_hint_y=None, height=24,
             halign="center",
         )
@@ -175,12 +152,11 @@ class QRScreen(Screen):
 
         layout.add_widget(Label(
             text="Show this to another device to pair instantly",
-            font_size="13sp", color=C_DIM,
+            font_size=FS_SM, color=T_DIM,
             size_hint_y=None, height=28,
             halign="center",
         ))
 
-        # Spacer
         layout.add_widget(Label())
 
         return layout
@@ -190,22 +166,18 @@ class QRScreen(Screen):
     def _build_scan_layout(self) -> BoxLayout:
         layout = BoxLayout(orientation="vertical", spacing=12)
 
-        # Header
-        header = BoxLayout(orientation="horizontal", size_hint_y=None, height=56, spacing=12)
-        back_btn = _nav_btn("← Back")
-        back_btn.bind(on_press=lambda _: self._go("home"))
-        header.add_widget(back_btn)
-
-        header.add_widget(Label(
-            text="[b]Scan QR[/b]", markup=True,
-            font_size="20sp", color=(1, 1, 1, 1),
-        ))
-
-        show_btn = _nav_btn("Show Mine", color=(0.18, 0.55, 0.85, 1))
+        # "Show Mine" button as right_widget on header
+        show_btn = SwampButton(text="Show Mine", color=C_NODE, height=H_BTN_SM)
+        show_btn.size_hint = (None, 1)
+        show_btn.width = 100
         show_btn.bind(on_press=lambda _: self._set_mode("show"))
-        header.add_widget(show_btn)
 
-        layout.add_widget(header)
+        self._scan_header = SwampHeader(
+            title="Scan QR",
+            back_screen="home",
+            right_widget=show_btn,
+        )
+        layout.add_widget(self._scan_header)
 
         # Camera area — populated lazily in _start_camera()
         self._camera_container = BoxLayout(
@@ -216,7 +188,7 @@ class QRScreen(Screen):
 
         self.scan_status_lbl = Label(
             text="Pointing camera at a Swamp QR code…",
-            font_size="13sp", color=C_DIM,
+            font_size=FS_SM, color=T_DIM,
             size_hint_y=None, height=32,
             halign="center",
         )
@@ -250,6 +222,8 @@ class QRScreen(Screen):
 
     def on_enter(self, *args):
         """Regenerate our QR code every time this screen is shown."""
+        self._show_header.set_manager(self.manager)
+        self._scan_header.set_manager(self.manager)
         Clock.schedule_once(lambda dt: self._refresh_qr(), 0)
 
     def on_leave(self, *args):
@@ -278,12 +252,12 @@ class QRScreen(Screen):
         # Labels
         self.show_name_lbl.text = f"[b]{name}[/b]"
         self.show_addr_lbl.text = f"{ip}:{port}"
+
+        # Role status dot
         if role == "master":
-            self.show_role_lbl.text = "★  Master"
-            self.show_role_lbl.color = C_MASTER
+            self._show_role_dot.set_status("★  Master", C_MASTER)
         else:
-            self.show_role_lbl.text = "⊙  Node"
-            self.show_role_lbl.color = C_NODE
+            self._show_role_dot.set_status("⊙  Node", C_NODE)
 
         # QR image
         if QR_UTILS_AVAILABLE and QRCODE_AVAILABLE and PIL_AVAILABLE:
@@ -307,7 +281,6 @@ class QRScreen(Screen):
 
     def _start_camera(self):
         """Instantiate the camera widget or fall back to manual entry."""
-        # Clear any previous content
         self._camera_container.clear_widgets()
         self._camera_widget = None
 
@@ -317,13 +290,11 @@ class QRScreen(Screen):
                 self._camera_widget = cam
                 self._camera_container.add_widget(cam)
                 self.scan_status_lbl.text = "Pointing camera at a Swamp QR code…"
-                # Start polling
                 self._scan_event = Clock.schedule_interval(self._scan_frame, 0.5)
                 return
             except Exception as exc:
                 logger.warning("Camera init failed: %s", exc)
 
-        # Fallback: manual IP entry
         self._build_manual_entry()
 
     def _stop_scan(self):
@@ -379,28 +350,26 @@ class QRScreen(Screen):
         content = BoxLayout(orientation="vertical", padding=20, spacing=14)
         content.add_widget(Label(
             text=f"[b]{info.get('name', '?')}[/b]",
-            markup=True, font_size="22sp", color=C_GREEN,
+            markup=True, font_size=FS_XL, color=C_GREEN,
             size_hint_y=None, height=38,
         ))
         content.add_widget(Label(
             text=role_label,
-            font_size="16sp", color=role_color,
+            font_size=FS_LG, color=role_color,
             size_hint_y=None, height=28,
         ))
         content.add_widget(Label(
             text=f"{info.get('ip', '')}:{info.get('port', '')}",
-            font_size="14sp", color=C_DIM,
+            font_size=FS_MD, color=T_DIM,
             size_hint_y=None, height=26,
         ))
 
-        popup_ref = [None]  # mutable container so the closure can dismiss it
+        popup_ref = [None]
 
-        connect_btn = Button(
+        connect_btn = SwampButton(
             text="Connect",
-            size_hint_y=None, height=50,
-            font_size="16sp",
-            background_color=C_GREEN,
-            background_normal="",
+            color=C_GREEN,
+            height=H_BTN,
         )
 
         def _do_connect(_btn):
@@ -413,12 +382,10 @@ class QRScreen(Screen):
         connect_btn.bind(on_press=_do_connect)
         content.add_widget(connect_btn)
 
-        cancel_btn = Button(
+        cancel_btn = SwampButton(
             text="Cancel",
-            size_hint_y=None, height=44,
-            font_size="14sp",
-            background_color=C_NAV,
-            background_normal="",
+            color=BG_RAISED,
+            height=H_BTN_SM,
         )
         cancel_btn.bind(on_press=lambda _: popup_ref[0].dismiss() if popup_ref[0] else None)
         content.add_widget(cancel_btn)
@@ -428,7 +395,7 @@ class QRScreen(Screen):
             content=content,
             size_hint=(0.85, None),
             height=340,
-            background_color=(0.10, 0.13, 0.16, 1),
+            background_color=BG_SURFACE,
         )
         popup_ref[0] = popup
         popup.open()
@@ -444,7 +411,7 @@ class QRScreen(Screen):
 
         instruction = Label(
             text="Enter peer IP address",
-            font_size="14sp", color=C_DIM,
+            font_size=FS_MD, color=T_DIM,
             size_hint_y=None, height=30,
             halign="center",
         )
@@ -454,25 +421,22 @@ class QRScreen(Screen):
         self._manual_ip = TextInput(
             hint_text="192.168.x.x",
             multiline=False,
-            size_hint_y=None, height=48,
+            size_hint_y=None, height=H_INPUT,
             font_size="16sp",
-            background_color=C_PANEL,
-            foreground_color=(1, 1, 1, 1),
+            background_color=BG_INPUT,
+            foreground_color=T_PRIMARY,
             cursor_color=C_GREEN,
         )
         self._camera_container.add_widget(self._manual_ip)
 
-        connect_btn = Button(
+        connect_btn = SwampButton(
             text="Connect",
-            size_hint_y=None, height=52,
-            font_size="16sp",
-            background_color=C_GREEN,
-            background_normal="",
+            color=C_GREEN,
+            height=H_BTN,
         )
         connect_btn.bind(on_press=self._on_manual_connect)
         self._camera_container.add_widget(connect_btn)
 
-        # Push widgets to the top
         self._camera_container.add_widget(Label())
 
     def _on_manual_connect(self, _btn):

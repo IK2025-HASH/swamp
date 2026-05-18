@@ -11,8 +11,18 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
-from kivy.uix.button import Button
 from kivy.graphics import Color, Rectangle, RoundedRectangle
+
+from src.ui.theme import (
+    BG_BASE, BG_SURFACE, BG_RAISED, BG_INPUT,
+    C_GREEN, C_SUCCESS,
+    T_PRIMARY, T_SECONDARY, T_DIM,
+    FS_XS, FS_SM, FS_MD,
+    RADIUS_MD,
+    H_INPUT,
+    SPACE_SM, SPACE_MD,
+)
+from src.ui.widgets import SwampHeader, SwampButton, EmptyState
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +39,6 @@ class ChatBubble(BoxLayout):
         )
         self.is_self = is_self
 
-        # Time string
         import datetime
         ts_str = datetime.datetime.fromtimestamp(timestamp).strftime("%H:%M")
 
@@ -39,11 +48,10 @@ class ChatBubble(BoxLayout):
             spacing=0,
         )
 
-        # Push self messages to the right
         if is_self:
             outer.add_widget(Label(size_hint_x=0.2))
 
-        bubble_bg_color = (0.2, 0.55, 0.35, 1) if is_self else (0.18, 0.22, 0.28, 1)
+        bubble_bg_color = C_SUCCESS if is_self else BG_RAISED
 
         bubble = BoxLayout(
             orientation="vertical",
@@ -53,14 +61,14 @@ class ChatBubble(BoxLayout):
         )
         with bubble.canvas.before:
             Color(*bubble_bg_color)
-            bubble._bg = RoundedRectangle(pos=bubble.pos, size=bubble.size, radius=[10])
+            bubble._bg = RoundedRectangle(pos=bubble.pos, size=bubble.size, radius=RADIUS_MD)
         bubble.bind(pos=lambda w, _: setattr(w._bg, "pos", w.pos))
         bubble.bind(size=lambda w, _: setattr(w._bg, "size", w.size))
 
         sender_lbl = Label(
             text=f"[b]{sender}[/b]",
             markup=True,
-            font_size="11sp",
+            font_size=FS_XS,
             color=(0.75, 0.95, 0.85, 1) if is_self else (0.6, 0.75, 0.9, 1),
             size_hint_y=None,
             height=18,
@@ -70,8 +78,8 @@ class ChatBubble(BoxLayout):
 
         msg_lbl = Label(
             text=text,
-            font_size="15sp",
-            color=(1, 1, 1, 1),
+            font_size=FS_MD,
+            color=T_PRIMARY,
             size_hint_y=None,
             halign="left",
             valign="top",
@@ -84,7 +92,7 @@ class ChatBubble(BoxLayout):
         time_lbl = Label(
             text=ts_str,
             font_size="10sp",
-            color=(0.6, 0.6, 0.6, 1),
+            color=T_DIM,
             size_hint_y=None,
             height=16,
             halign="right",
@@ -95,7 +103,6 @@ class ChatBubble(BoxLayout):
         bubble.add_widget(msg_lbl)
         bubble.add_widget(time_lbl)
 
-        # Bind bubble height to content
         def _update_bubble_height(*_):
             bubble.height = sender_lbl.height + msg_lbl.height + time_lbl.height + 24
             outer.height = bubble.height + 8
@@ -110,7 +117,7 @@ class ChatBubble(BoxLayout):
         if not is_self:
             outer.add_widget(Label(size_hint_x=0.2))
 
-        outer.height = 60  # default, updated above
+        outer.height = 60
         self.height = 68
 
         self.add_widget(outer)
@@ -125,6 +132,7 @@ class ChatScreen(Screen):
         super().__init__(**kwargs)
         self.app_ref = None
         self.peer_name = "Peer"
+        self._has_messages = False
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -133,51 +141,27 @@ class ChatScreen(Screen):
 
     def _build_ui(self):
         with self.canvas.before:
-            Color(0.08, 0.10, 0.12, 1)
+            Color(*BG_BASE)
             self._bg = Rectangle(pos=self.pos, size=self.size)
         self.bind(pos=self._upd_bg, size=self._upd_bg)
 
         root = BoxLayout(orientation="vertical", spacing=0)
 
         # Header
-        header = BoxLayout(
-            orientation="horizontal",
-            size_hint_y=None,
-            height=56,
-            padding=(8, 6),
-            spacing=10,
-        )
-        with header.canvas.before:
-            Color(0.10, 0.13, 0.16, 1)
-            header._bg = Rectangle(pos=header.pos, size=header.size)
-        header.bind(pos=lambda w, _: setattr(w._bg, "pos", w.pos))
-        header.bind(size=lambda w, _: setattr(w._bg, "size", w.size))
+        self.header = SwampHeader(title="Chat", back_screen="devices")
+        root.add_widget(self.header)
 
-        back_btn = Button(
-            text="←",
-            size_hint=(None, 1),
-            width=50,
-            font_size="20sp",
-            background_color=(0.2, 0.24, 0.28, 1),
-            background_normal="",
-        )
-        back_btn.bind(on_press=lambda _: self._go("devices"))
-        header.add_widget(back_btn)
+        # Message area: empty state + scroll stacked
+        self._msg_area = BoxLayout(orientation="vertical")
 
-        self.header_lbl = Label(
-            text=f"[b]Chat — {self.peer_name}[/b]",
-            markup=True,
-            font_size="18sp",
-            color=(1, 1, 1, 1),
+        self._empty_state = EmptyState(
+            icon="✉",
+            title="No messages yet",
+            subtitle="Connect to a peer to start chatting",
         )
-        header.add_widget(self.header_lbl)
-        root.add_widget(header)
+        self._msg_area.add_widget(self._empty_state)
 
-        # Message list
-        scroll = ScrollView(
-            bar_width=4,
-            do_scroll_x=False,
-        )
+        scroll = ScrollView(bar_width=4, do_scroll_x=False)
         self._scroll = scroll
 
         self.msg_list = BoxLayout(
@@ -188,18 +172,22 @@ class ChatScreen(Screen):
         )
         self.msg_list.bind(minimum_height=self.msg_list.setter("height"))
         scroll.add_widget(self.msg_list)
-        root.add_widget(scroll)
+        scroll.opacity = 0
+        scroll.disabled = True
+        self._msg_area.add_widget(scroll)
+
+        root.add_widget(self._msg_area)
 
         # Input row
         input_row = BoxLayout(
             orientation="horizontal",
             size_hint_y=None,
-            height=56,
-            padding=(8, 6),
-            spacing=8,
+            height=H_INPUT + SPACE_MD,
+            padding=(SPACE_SM, SPACE_SM),
+            spacing=SPACE_SM,
         )
         with input_row.canvas.before:
-            Color(0.10, 0.13, 0.16, 1)
+            Color(*BG_RAISED)
             input_row._bg = Rectangle(pos=input_row.pos, size=input_row.size)
         input_row.bind(pos=lambda w, _: setattr(w._bg, "pos", w.pos))
         input_row.bind(size=lambda w, _: setattr(w._bg, "size", w.size))
@@ -208,29 +196,30 @@ class ChatScreen(Screen):
             hint_text="Type a message…",
             multiline=False,
             size_hint_y=None,
-            height=44,
-            font_size="15sp",
-            background_color=(0.15, 0.18, 0.22, 1),
-            foreground_color=(1, 1, 1, 1),
-            cursor_color=(0.2, 0.85, 0.6, 1),
+            height=H_INPUT,
+            font_size=FS_MD,
+            background_color=BG_INPUT,
+            foreground_color=T_PRIMARY,
+            cursor_color=C_GREEN,
         )
         self.msg_input.bind(on_text_validate=self._on_send)
         input_row.add_widget(self.msg_input)
 
-        send_btn = Button(
-            text="Send",
-            size_hint=(None, None),
-            width=80,
-            height=44,
-            font_size="15sp",
-            background_color=(0.2, 0.75, 0.55, 1),
-            background_normal="",
+        self._send_btn = SwampButton(
+            text="↑",
+            color=C_GREEN,
+            height=H_INPUT,
         )
-        send_btn.bind(on_press=self._on_send)
-        input_row.add_widget(send_btn)
+        self._send_btn.size_hint = (None, None)
+        self._send_btn.width = 52
+        self._send_btn.bind(on_press=self._on_send)
+        input_row.add_widget(self._send_btn)
         root.add_widget(input_row)
 
         self.add_widget(root)
+
+    def on_enter(self, *args):
+        self.header.set_manager(self.manager)
 
     def _upd_bg(self, *_):
         self._bg.pos = self.pos
@@ -247,7 +236,7 @@ class ChatScreen(Screen):
     def set_peer(self, peer_name: str):
         """Update the active chat peer."""
         self.peer_name = peer_name
-        self.header_lbl.text = f"[b]Chat — {peer_name}[/b]"
+        self.header.title = f"Chat — {peer_name}"
 
     # ------------------------------------------------------------------
     # Message handling
@@ -262,7 +251,6 @@ class ChatScreen(Screen):
         if self.app_ref:
             self.app_ref.send_chat_message(text, self.peer_name)
 
-        # Show in own UI immediately
         self.add_message(text, self.app_ref.device_name if self.app_ref else "Me", True, time.time())
 
     def add_message(self, text: str, sender: str, is_self: bool, timestamp: float):
@@ -270,9 +258,15 @@ class ChatScreen(Screen):
         Clock.schedule_once(lambda dt: self._add_message_ui(text, sender, is_self, timestamp))
 
     def _add_message_ui(self, text: str, sender: str, is_self: bool, timestamp: float):
+        if not self._has_messages:
+            self._has_messages = True
+            self._empty_state.opacity = 0
+            self._empty_state.disabled = True
+            self._scroll.opacity = 1
+            self._scroll.disabled = False
+
         bubble = ChatBubble(text=text, sender=sender, is_self=is_self, timestamp=timestamp)
         self.msg_list.add_widget(bubble)
-        # Scroll to bottom after layout
         Clock.schedule_once(lambda dt: self._scroll_to_bottom(), 0.05)
 
     def _scroll_to_bottom(self):
