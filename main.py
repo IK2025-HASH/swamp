@@ -59,7 +59,9 @@ from src.screens.devices import DevicesScreen
 from src.screens.chat import ChatScreen
 from src.screens.files import FilesScreen
 from src.screens.sync import SyncScreen
+from src.screens.qr_screen import QRScreen
 from src.utils.android_utils import ensure_swamp_dir, IS_ANDROID
+from src.utils.qr_utils import get_local_ip
 
 RECEIVE_DIR = ensure_swamp_dir()
 HEARTBEAT_INTERVAL = 30.0   # seconds between node → master pings
@@ -104,6 +106,7 @@ class SwampApp(App):
         self._chat: ChatScreen = None
         self._files: FilesScreen = None
         self._sync: SyncScreen = None
+        self._qr_screen: QRScreen = None
 
         self._active_peer: str = ""
         self._heartbeat_task: asyncio.Task = None
@@ -120,8 +123,10 @@ class SwampApp(App):
         self._chat = ChatScreen(name="chat")
         self._files = FilesScreen(name="files")
         self._sync = SyncScreen(name="sync")
+        self._qr_screen = QRScreen(name="qr")
 
-        for screen in (self._home, self._devices, self._chat, self._files, self._sync):
+        for screen in (self._home, self._devices, self._chat,
+                       self._files, self._sync, self._qr_screen):
             screen.app_ref = self
             sm.add_widget(screen)
 
@@ -593,6 +598,27 @@ class SwampApp(App):
             except Exception as e:
                 logger.debug("send_screen_frame: %s", e)
         self._run_async(_send())
+
+    # ------------------------------------------------------------------
+    # QR pairing
+    # ------------------------------------------------------------------
+
+    def connect_from_qr(self, info: dict):
+        """Initiate a connection to a peer described by a decoded QR payload."""
+        name = info.get("name", "")
+        ip   = info.get("ip", "")
+        port = info.get("port", 54321)
+        self.connect_to_peer(name, ip, port)
+
+    def get_qr_info(self) -> dict:
+        """Return the data this device should encode in its QR code."""
+        return {
+            "name":    self.device_name,
+            "ip":      get_local_ip(),
+            "port":    54321,
+            "role":    self.topology.role.value,
+            "node_id": self.topology.node_id,
+        }
 
     # ------------------------------------------------------------------
     # Helpers

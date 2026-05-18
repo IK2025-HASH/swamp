@@ -159,6 +159,7 @@ class HomeScreen(Screen):
         )
         for label, sname in [
             ("Devices", "devices"),
+            ("QR Pair", "qr"),
             ("Chat", "chat"),
             ("Files", "files"),
             ("Sync", "sync"),
