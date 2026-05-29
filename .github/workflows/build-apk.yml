@@ -43,26 +43,58 @@ jobs:
             libzbar0 libzbar-dev \
             ccache
 
-      # ── 5. Android SDK via official action ───────────────────────────
-      #       This gives us a modern SDK with cmdline-tools at the correct path.
+      # ── 5. Android SDK (provides a working sdkmanager) ───────────────
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # ── 6. Install required SDK packages + accept all licenses ───────
+      # ── 6. Install packages into ANDROID_HOME ────────────────────────
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "build-tools;34.0.0" "build-tools;37.0.0" "platforms;android-33" "ndk;25.1.8937393"
+          sdkmanager "build-tools;37.0.0" "platforms;android-33" "ndk;25.1.8937393"
 
-      # ── 7. Compatibility shim ────────────────────────────────────────
-      #       Buildozer/p4a looks for sdkmanager at the legacy path
-      #       tools/bin/sdkmanager; newer SDK ships it under cmdline-tools.
-      #       A symlink bridges the gap without patching python-for-android.
-      - name: Create legacy sdkmanager symlink for Buildozer
+      # ── 7. Pre-populate Buildozer's SDK directory ────────────────────
+      #
+      #   Buildozer keeps its OWN copy of the Android SDK at
+      #   ~/.buildozer/android/platform/android-sdk — completely separate
+      #   from ANDROID_HOME.  If that directory already exists when
+      #   buildozer starts, it skips its own download and uses what's there.
+      #
+      #   Strategy:
+      #     a) Copy cmdline-tools from ANDROID_HOME → buildozer SDK dir
+      #     b) Create the legacy tools/bin/sdkmanager symlink p4a expects
+      #     c) Accept all licenses inside the buildozer SDK dir
+      #     d) Pre-install build-tools;37.0.0 + platforms;android-33 there
+      #     e) Symlink NDK (saves the 1 GB download)
+      #
+      - name: Pre-populate Buildozer SDK + NDK directories
         run: |
-          mkdir -p "$ANDROID_HOME/tools/bin"
-          ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-                 "$ANDROID_HOME/tools/bin/sdkmanager"
+          SDK="$HOME/.buildozer/android/platform/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
+
+          # (a) copy cmdline-tools
+          cp -r "$ANDROID_HOME/cmdline-tools/latest" "$SDK/cmdline-tools/"
+
+          # (b) legacy sdkmanager path expected by python-for-android
+          mkdir -p "$SDK/tools/bin"
+          ln -sf "$SDK/cmdline-tools/latest/bin/sdkmanager" "$SDK/tools/bin/sdkmanager"
+
+          # (c) accept all licenses inside buildozer's SDK
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" \
+            --sdk_root="$SDK" --licenses || true
+
+          # (d) pre-install the packages p4a will request
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" \
+            "build-tools;37.0.0" "platforms;android-33"
+
+          # (e) symlink NDK so buildozer skips the 1 GB NDK download
+          ln -sf "$ANDROID_HOME/ndk/25.1.8937393" \
+                 "$HOME/.buildozer/android/platform/android-ndk-r25b"
+
+          echo "=== SDK layout ==="
+          ls "$SDK/"
+          echo "=== build-tools ==="
+          ls "$SDK/build-tools/" || echo "(none yet)"
 
       # ── 8. Buildozer ─────────────────────────────────────────────────
       - name: Install Buildozer
@@ -70,7 +102,7 @@ jobs:
           pip install --upgrade pip
           pip install buildozer cython
 
-      # ── 9. Cache built artefacts (NDK compile etc.) ──────────────────
+      # ── 9. Cache compiled p4a recipes (expensive; reused across runs) ─
       - name: Cache .buildozer dir
         uses: actions/cache@v4
         with:
@@ -78,17 +110,11 @@ jobs:
           key: buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
           restore-keys: buildozer-
 
-      # ── 10. Tell Buildozer to use the pre-installed SDK + NDK ────────
-      - name: Patch buildozer.spec with pre-installed SDK/NDK paths
-        run: |
-          echo "android.sdk_path = $ANDROID_HOME" >> buildozer.spec
-          echo "android.ndk_path = $ANDROID_HOME/ndk/25.1.8937393" >> buildozer.spec
-
-      # ── 11. Build ────────────────────────────────────────────────────
+      # ── 10. Build ────────────────────────────────────────────────────
       - name: Build debug APK
         run: buildozer android debug
 
-      # ── 12. Artifact ─────────────────────────────────────────────────
+      # ── 11. Artifact ─────────────────────────────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
