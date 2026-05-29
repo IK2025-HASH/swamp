@@ -112,7 +112,9 @@ jobs:
 
       # ── 10. Build ────────────────────────────────────────────────────
       - name: Build debug APK
-        run: buildozer android debug
+        run: |
+          cp buildozer_minimal.spec buildozer.spec
+          buildozer android debug
 
       # ── 11. Artifact ─────────────────────────────────────────────────
       - name: Upload APK artifact
