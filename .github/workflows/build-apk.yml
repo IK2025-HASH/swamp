@@ -52,7 +52,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses || true
-          sdkmanager "build-tools;34.0.0" "platforms;android-33" "ndk;25.1.8937393"
+          sdkmanager "build-tools;34.0.0" "build-tools;37.0.0" "platforms;android-33" "ndk;25.1.8937393"
 
       # ── 7. Compatibility shim ────────────────────────────────────────
       #       Buildozer/p4a looks for sdkmanager at the legacy path
