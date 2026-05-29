@@ -5,7 +5,7 @@ on:
     branches:
       - claude/android-file-sharing-app-jNDL3
       - main
-  workflow_dispatch:   # lets you trigger a build manually from the Actions tab
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Java (Android SDK tooling needs JDK 17) ───────────────────
+      # ── 2. Java ──────────────────────────────────────────────────────
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      # ── 4. System packages needed by Buildozer + pyzbar ─────────────
+      # ── 4. System packages ───────────────────────────────────────────
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -43,50 +43,52 @@ jobs:
             libzbar0 libzbar-dev \
             ccache
 
-      # ── 5. Buildozer + Cython ────────────────────────────────────────
+      # ── 5. Android SDK via official action ───────────────────────────
+      #       This gives us a modern SDK with cmdline-tools at the correct path.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # ── 6. Install required SDK packages + accept all licenses ───────
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "build-tools;34.0.0" "platforms;android-33" "ndk;25.1.8937393"
+
+      # ── 7. Compatibility shim ────────────────────────────────────────
+      #       Buildozer/p4a looks for sdkmanager at the legacy path
+      #       tools/bin/sdkmanager; newer SDK ships it under cmdline-tools.
+      #       A symlink bridges the gap without patching python-for-android.
+      - name: Create legacy sdkmanager symlink for Buildozer
+        run: |
+          mkdir -p "$ANDROID_HOME/tools/bin"
+          ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+                 "$ANDROID_HOME/tools/bin/sdkmanager"
+
+      # ── 8. Buildozer ─────────────────────────────────────────────────
       - name: Install Buildozer
         run: |
           pip install --upgrade pip
           pip install buildozer cython
 
-      # ── 6. Cache .buildozer (SDK, NDK, Python-for-android recipes) ───
-      #       Key changes only when buildozer.spec or requirements change,
-      #       so the ~2 GB download is reused across runs.
-      - name: Cache Buildozer global dir
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
-          restore-keys: buildozer-global-
-
-      - name: Cache local .buildozer dir
+      # ── 9. Cache built artefacts (NDK compile etc.) ──────────────────
+      - name: Cache .buildozer dir
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-local-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
-          restore-keys: buildozer-local-
+          key: buildozer-${{ hashFiles('buildozer.spec', 'requirements.txt') }}
+          restore-keys: buildozer-
 
-      # ── 7. Pre-accept Android SDK licenses ──────────────────────────
-      #       Buildozer installs the SDK to ~/.buildozer/android/platform/android-sdk.
-      #       Pre-creating the license files prevents sdkmanager from refusing
-      #       to install build-tools because licences weren't accepted interactively.
-      - name: Pre-accept Android SDK licenses
+      # ── 10. Tell Buildozer to use the pre-installed SDK + NDK ────────
+      - name: Patch buildozer.spec with pre-installed SDK/NDK paths
         run: |
-          mkdir -p ~/.buildozer/android/platform/android-sdk/licenses
-          printf '\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n' \
-            > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-license
-          printf '\n84831b9409646a918e30573bab4c9c91346d8abd\n' \
-            > ~/.buildozer/android/platform/android-sdk/licenses/android-sdk-preview-license
-          printf '\nd975f751698a77b662f1254ddbeed3901e976f5a\n' \
-            > ~/.buildozer/android/platform/android-sdk/licenses/intel-android-extra-license
-          printf '\n33b6a2b64607f11b759f320ef9dff4ae5c47d97a\n' \
-            > ~/.buildozer/android/platform/android-sdk/licenses/mips-android-sysimage-license
+          echo "android.sdk_path = $ANDROID_HOME" >> buildozer.spec
+          echo "android.ndk_path = $ANDROID_HOME/ndk/25.1.8937393" >> buildozer.spec
 
-      # ── 8. Build debug APK ───────────────────────────────────────────
+      # ── 11. Build ────────────────────────────────────────────────────
       - name: Build debug APK
         run: buildozer android debug
 
-      # ── 8. Upload APK as downloadable artifact ───────────────────────
+      # ── 12. Artifact ─────────────────────────────────────────────────
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
